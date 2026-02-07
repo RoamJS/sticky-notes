@@ -1,37 +1,30 @@
-# RoamJS Extension Base
+<a href="https://roamjs.com/">
+    <img src="https://avatars.githubusercontent.com/u/138642184" alt="RoamJS Logo" title="RoamJS" align="right" height="60" />
+</a>
 
-Stock base for [RoamJS](https://roamjs.com) Roam Research extensions. **Fork this repo** to start a new extension.
+# Sticky Notes
 
-## What's included
+**Quick, ephemeral notes that float on top of your Roam Research graph.** Jot something down, drag it wherever you want, and when you're done—remove it. No clutter, no permanent page unless you want one.
 
-- **roamjs-components** — shared utilities, DOM helpers, queries, writes, and UI components
-- **Samepage build** — `samepage build` produces the Roam Depot–ready bundle
-- **Settings panel** — example `extensionAPI.settings.panel.create` with an Enable switch
-- **TypeScript** — tsconfig extending `@samepage/scripts`
-- **CI** — GitHub Actions to build on push/PR (uses RoamJS secrets for publish)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/RoamJS/sticky-notes)
 
-## After forking
+## What are Sticky Notes?
 
-1. **Rename the repo** and update `package.json`:
-   - `name`: your extension slug (e.g. `my-extension`)
-   - `description`: one line describing the extension
+Sticky Notes are lightweight notes that sit in a layer above your Roam graph. They're meant for **quick, temporary capture**: ideas you're playing with, reminders for the current session, or scratch space while you work. When you delete a sticky note, it's gone—the block is removed from your graph. No archive, no cleanup later.
 
-2. **Implement in `src/index.ts`**:
-   - Keep or replace the settings panel
-   - Add your logic using `roamjs-components` (e.g. `createHTMLObserver`, `createBlock`, `renderToast`)
-   - Return `{ unload }` to clean up on unload
+## Features
 
-3. **Optional**: Add React components under `src/components/` (see [autocomplete](https://github.com/RoamJS/autocomplete), [giphy](https://github.com/RoamJS/giphy) for examples).
+- **Full Roam inside every note** — Each sticky is a real Roam block. Use **tags** `#like-this`, **images**, **embeds**, **links**, and everything else you normally do in Roam.
+- **Drag anywhere** — Grab the note by the header bar and drag it anywhere on your screen. Position and size are remembered for your session.
+- **Resize** — Drag the corner or edge of a note to make it bigger or smaller.
+- **Minimize** — Collapse a note to just its title bar when you want it out of the way but still visible.
+- **Ephemeral by design** — Delete a note with the ✕ button and the block is removed from Roam. Perfect for throwaway thoughts and temporary scratch space.
 
-4. **Secrets (for publish)** — in the forked repo, configure:
-   - `ROAMJS_RELEASE_TOKEN`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`
-   - `AWS_REGION`, `ROAMJS_PROXY` (vars)
+## How to use
 
-## Scripts
+1. **Create a sticky note** — Open the command palette (`Ctrl/Cmd + Shift + P`), run **"Sticky Notes: Create Sticky Note"**, and a new note appears.
+2. **Move it** — Click and drag the colored header bar to place the note wherever you like.
+3. **Edit** — Type in the note as you would in any Roam block. Use `#tags`, `/commands`, images, and links.
+4. **Remove it** — Click the **✕** on the note when you're done. The note and its content are deleted from your graph.
 
-- `npm start` — samepage dev (local development)
-- `npm run build:roam` — build for Roam (dry run; CI runs `npx samepage build`)
-
-## License
-
-MIT
+Sticky notes are stored under a single Roam page (`roam/js/sticky-note`) so they stay in your graph while they exist, but the extension is built so you can treat them as disposable: create, use, delete.
