@@ -38,7 +38,7 @@ type RoamReactApi = {
 
 const PAGE_TITLE = "roam/js/sticky-note";
 const STORAGE_KEY = "roam-sticky-note-layouts";
-const COMMAND_LABEL = "Create Sticky Note";
+const COMMAND_LABEL = "Sticky Notes: Create Sticky Note";
 const NOTE_CLASS = "roamjs-sticky-note";
 const NOTE_MINIMIZED_CLASS = "roamjs-sticky-note--minimized";
 const NOTE_DRAGGING_CLASS = "roamjs-sticky-note--dragging";
@@ -200,6 +200,81 @@ const updateLayout = (
     ...next,
   };
   setLayouts(layouts);
+};
+
+const getStickyRenderedIdFromUid = ({
+  uid,
+  root = document,
+}: {
+  uid: string;
+  root?: ParentNode;
+}): string | null => {
+  const el = root.querySelector(
+    `.roamjs-sticky-note__embedded-root [id^="block-input-"][id$="-${uid}"]`
+  ) as HTMLElement | null;
+  return el?.id || null;
+};
+
+const getStickyWindowIdFromUid = ({
+  uid,
+  root = document,
+}: {
+  uid: string;
+  root?: ParentNode;
+}): string | null => {
+  const id = getStickyRenderedIdFromUid({ uid, root });
+  if (!id) {
+    return null;
+  }
+  const match = id.match(/^block-input-(.+)-([A-Za-z0-9_-]{9})$/);
+  return match ? match[1] : null;
+};
+
+const focusStickyRenderedUid = ({
+  uid,
+  root = document,
+}: {
+  uid: string;
+  root?: ParentNode;
+}): boolean => {
+  const windowId = getStickyWindowIdFromUid({ uid, root });
+  if (!windowId) {
+    return false;
+  }
+  window.roamAlphaAPI.ui.setBlockFocusAndSelection({
+    location: {
+      "block-uid": uid,
+      "window-id": windowId,
+    },
+  });
+  return true;
+};
+
+const focusStickyRenderedUidWithRetries = ({
+  uid,
+  root,
+}: {
+  uid: string;
+  root: ParentNode;
+}): void => {
+  const timerIds: number[] = [];
+  let focused = false;
+  [60, 140, 280, 520, 900].forEach((delay) => {
+    const timerId = window.setTimeout(() => {
+      if (focused) {
+        return;
+      }
+      focused = focusStickyRenderedUid({ uid, root });
+      if (focused) {
+        timerIds.forEach((id) => {
+          if (id !== timerId) {
+            window.clearTimeout(id);
+          }
+        });
+      }
+    }, delay);
+    timerIds.push(timerId);
+  });
 };
 
 const createStickyNoteElement = ({
@@ -407,6 +482,21 @@ const createStickyNoteElement = ({
 };
 
 export default runExtension(async ({ extensionAPI }) => {
+  const stickyNoteDebug = window as unknown as {
+    roamjsStickyNoteDebug?: {
+      getStickyRenderedIdFromUid: typeof getStickyRenderedIdFromUid;
+      getStickyWindowIdFromUid: typeof getStickyWindowIdFromUid;
+      focusStickyRenderedUid: typeof focusStickyRenderedUid;
+      focusStickyRenderedUidWithRetries: typeof focusStickyRenderedUidWithRetries;
+    };
+  };
+  stickyNoteDebug.roamjsStickyNoteDebug = {
+    getStickyRenderedIdFromUid,
+    getStickyWindowIdFromUid,
+    focusStickyRenderedUid,
+    focusStickyRenderedUidWithRetries,
+  };
+
   extensionAPI.settings.panel.create({
     tabTitle: "Extension",
     settings: [
@@ -503,6 +593,14 @@ export default runExtension(async ({ extensionAPI }) => {
       color: #5a4b1d;
     }
 
+    .${NOTE_CLASS} .roamjs-sticky-note__button:focus,
+    .${NOTE_CLASS} .roamjs-sticky-note__button:focus-visible,
+    .${NOTE_CLASS} .roamjs-sticky-note__button.bp3-active,
+    .${NOTE_CLASS} .roamjs-sticky-note__button.bp3-active:focus {
+      outline: none !important;
+      box-shadow: none !important;
+    }
+
     .${NOTE_CLASS} .roamjs-sticky-note__content {
       padding: 6px 10px 12px;
       flex: 1;
@@ -570,7 +668,7 @@ export default runExtension(async ({ extensionAPI }) => {
   const layouts = getLayouts();
   const resizeObservers = new Set<ResizeObserver>();
   const blockUnmounts = new Set<() => void>();
-  const pageUid = await ensurePageUid();
+  await ensurePageUid();
   const existingUids = fetchStickyNoteUids();
 
   for (const [index, uid] of existingUids.entries()) {
@@ -592,15 +690,16 @@ export default runExtension(async ({ extensionAPI }) => {
   setLayouts(layouts);
 
   const createStickyNote = async (): Promise<void> => {
+    const pageUid = await ensurePageUid();
     const uid = await createBlock({
       parentUid: pageUid,
       order: "last",
       node: { text: "Sticky Note" },
     });
-    await createBlock({
+    const firstContentUid = await createBlock({
       parentUid: uid,
       order: 0,
-      node: { text: " " },
+      node: { text: "" },
     });
     const layout = defaultLayout(
       Object.keys(layouts).length,
@@ -618,6 +717,7 @@ export default runExtension(async ({ extensionAPI }) => {
       blockUnmounts,
     });
     container.append(note);
+    focusStickyRenderedUidWithRetries({ uid: firstContentUid, root: note });
   };
 
   await extensionAPI.ui.commandPalette.addCommand({
@@ -629,6 +729,7 @@ export default runExtension(async ({ extensionAPI }) => {
     elements: [style],
     commands: [COMMAND_LABEL],
     unload: () => {
+      delete stickyNoteDebug.roamjsStickyNoteDebug;
       resizeObservers.forEach((observer) => observer.disconnect());
       resizeObservers.clear();
       blockUnmounts.forEach((unmount) => unmount());
