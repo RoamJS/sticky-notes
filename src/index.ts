@@ -205,7 +205,7 @@ const applyLayout = (
   note.classList.toggle(NOTE_MINIMIZED_CLASS, layout.minimized);
 };
 
-const updateLayout = (
+const mutateLayout = (
   layouts: StickyNoteLayouts,
   uid: string,
   next: Partial<StickyNoteLayout>
@@ -215,7 +215,6 @@ const updateLayout = (
     ...(current || defaultLayout(0, window.innerWidth, window.innerHeight)),
     ...next,
   };
-  setLayouts(layouts);
 };
 
 const getStickyRenderedIdFromUid = ({
@@ -419,6 +418,17 @@ const createStickyNoteElement = ({
   let dragOffsetY = 0;
   let isDragging = false;
   let previousBodyUserSelect = "";
+  let resizePersistTimeout: number | null = null;
+
+  const scheduleLayoutPersistence = (): void => {
+    if (resizePersistTimeout) {
+      window.clearTimeout(resizePersistTimeout);
+    }
+    resizePersistTimeout = window.setTimeout(() => {
+      resizePersistTimeout = null;
+      setLayouts(layouts);
+    }, 250);
+  };
 
   const onPointerMove = (event: PointerEvent): void => {
     if (!isDragging) {
@@ -428,7 +438,7 @@ const createStickyNoteElement = ({
     const y = event.clientY - dragOffsetY;
     note.style.left = `${x}px`;
     note.style.top = `${y}px`;
-    updateLayout(layouts, uid, { x, y });
+    mutateLayout(layouts, uid, { x, y });
   };
 
   const onPointerUp = (): void => {
@@ -440,6 +450,7 @@ const createStickyNoteElement = ({
     document.body.style.userSelect = previousBodyUserSelect;
     document.removeEventListener("pointermove", onPointerMove);
     document.removeEventListener("pointerup", onPointerUp);
+    setLayouts(layouts);
   };
 
   const onPointerDown = (event: PointerEvent): void => {
@@ -467,7 +478,8 @@ const createStickyNoteElement = ({
       "aria-label",
       nextMinimized ? "Expand sticky note" : "Minimize sticky note"
     );
-    updateLayout(layouts, uid, { minimized: nextMinimized });
+    mutateLayout(layouts, uid, { minimized: nextMinimized });
+    setLayouts(layouts);
     window.requestAnimationFrame(() => {
       const activeElement = document.activeElement as HTMLElement | null;
       activeElement?.blur();
@@ -482,10 +494,11 @@ const createStickyNoteElement = ({
       if (entry.target.classList.contains(NOTE_MINIMIZED_CLASS)) {
         return;
       }
-      updateLayout(layouts, uid, {
+      mutateLayout(layouts, uid, {
         width: Math.round(entry.target.offsetWidth),
         height: Math.round(entry.target.offsetHeight),
       });
+      scheduleLayoutPersistence();
     });
   });
   resizeObservers.add(resizeObserver);
@@ -501,6 +514,10 @@ const createStickyNoteElement = ({
       return;
     }
 
+    if (resizePersistTimeout) {
+      window.clearTimeout(resizePersistTimeout);
+      resizePersistTimeout = null;
+    }
     resizeObserver.disconnect();
     resizeObservers.delete(resizeObserver);
     cleanupEmbeddedBlock();
