@@ -91,22 +91,46 @@ const fetchBlockChildren = (uid: string): BlockChild[] => {
     .map(([childUid, text]) => ({ uid: childUid, text }));
 };
 
+const fetchBlockText = (uid: string): string => {
+  const result = window.roamAlphaAPI.q(
+    `[:find ?text
+      :in $ ?uid
+      :where
+        [?b :block/uid ?uid]
+        [(get-else $ ?b :block/string "") ?text]]`,
+    uid
+  ) as [string][];
+  return result.length ? result[0][0] : "";
+};
+
 const ensureStickyNoteMeta = async (noteUid: string): Promise<StickyNoteMeta> => {
+  const noteText = fetchBlockText(noteUid).trim();
   const children = fetchBlockChildren(noteUid);
-  const titleChild = children[0];
-  if (!titleChild) {
-    const titleUid = await createBlock({
-      parentUid: noteUid,
-      order: 0,
-      node: { text: "Sticky Note" },
-    });
-    return { titleUid, titleText: "Sticky Note", contentUids: [] };
+
+  if (noteText) {
+    return {
+      titleUid: noteUid,
+      titleText: noteText,
+      contentUids: children.map((c) => c.uid),
+    };
   }
 
+  const legacyTitleChild = children[0];
+  if (legacyTitleChild) {
+    return {
+      titleUid: legacyTitleChild.uid,
+      titleText: legacyTitleChild.text || "Sticky Note",
+      contentUids: children.slice(1).map((c) => c.uid),
+    };
+  }
+
+  window.roamAlphaAPI.updateBlock({
+    block: { uid: noteUid, string: "Sticky Note" },
+  });
   return {
-    titleUid: titleChild.uid,
-    titleText: titleChild.text,
-    contentUids: children.slice(1).map((c) => c.uid),
+    titleUid: noteUid,
+    titleText: "Sticky Note",
+    contentUids: [],
   };
 };
 
@@ -454,16 +478,11 @@ export default runExtension(async ({ extensionAPI }) => {
     const uid = await createBlock({
       parentUid: pageUid,
       order: "last",
-      node: { text: " " },
-    });
-    const titleUid = await createBlock({
-      parentUid: uid,
-      order: 0,
       node: { text: "Sticky Note" },
     });
     const contentUid = await createBlock({
       parentUid: uid,
-      order: 1,
+      order: 0,
       node: { text: " " },
     });
     const layout = defaultLayout(
@@ -477,7 +496,7 @@ export default runExtension(async ({ extensionAPI }) => {
       uid,
       layout,
       layouts,
-      meta: { titleUid, titleText: "Sticky Note", contentUids: [contentUid] },
+      meta: { titleUid: uid, titleText: "Sticky Note", contentUids: [contentUid] },
       resizeObservers,
     });
     container.append(note);
