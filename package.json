@@ -1,7 +1,7 @@
 {
-  "name": "extension-base",
+  "name": "sticky-notes",
   "version": "1.0.0",
-  "description": "Stock RoamJS Roam Research Extension base — fork this repo to start new extensions.",
+  "description": "Sticky Notes Extension for Roam Research",
   "main": "index.js",
   "scripts": {
     "postinstall": "patch-package",
@@ -10,7 +10,13 @@
     "build:roam": "samepage build --dry",
     "test": "samepage test"
   },
-  "keywords": ["roam", "roam-research", "roamjs"],
+  "keywords": [
+    "roam",
+    "roam-research",
+    "roamjs",
+    "sticky-notes",
+    "extension"
+  ],
   "license": "MIT",
   "dependencies": {
     "roamjs-components": "^0.86.4"
