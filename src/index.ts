@@ -712,7 +712,7 @@ export default runExtension(async ({ extensionAPI }) => {
   container.style.width = "100%";
   container.style.height = "100%";
   container.style.pointerEvents = "none";
-  container.style.zIndex = "2147483000";
+  container.style.zIndex = "19";
   document.body.append(container);
 
   const layouts = getLayouts();
@@ -746,33 +746,54 @@ export default runExtension(async ({ extensionAPI }) => {
 
   const createStickyNote = async (): Promise<void> => {
     const pageUid = await ensurePageUid();
-    const uid = await createBlock({
-      parentUid: pageUid,
-      order: "last",
-      node: { text: "Sticky Note" },
-    });
-    const firstContentUid = await createBlock({
-      parentUid: uid,
-      order: 0,
-      node: { text: "" },
-    });
-    const layout = defaultLayout(
-      Object.keys(layouts).length,
-      window.innerWidth,
-      window.innerHeight
-    );
-    layouts[uid] = layout;
-    setLayouts(layouts);
-    const note = createStickyNoteElement({
-      uid,
-      layout,
-      layouts,
-      meta: { titleUid: uid, titleText: "Sticky Note" },
-      resizeObservers,
-      blockUnmounts,
-    });
-    container.append(note);
-    focusStickyRenderedUidWithRetries({ uid: firstContentUid, root: note });
+    let uid: string | null = null;
+    let firstContentUid: string | null = null;
+    try {
+      uid = await createBlock({
+        parentUid: pageUid,
+        order: "last",
+        node: { text: "Sticky Note" },
+      });
+      firstContentUid = await createBlock({
+        parentUid: uid,
+        order: 0,
+        node: { text: "" },
+      });
+
+      const layout = defaultLayout(
+        Object.keys(layouts).length,
+        window.innerWidth,
+        window.innerHeight
+      );
+      layouts[uid] = layout;
+      setLayouts(layouts);
+      const note = createStickyNoteElement({
+        uid,
+        layout,
+        layouts,
+        meta: { titleUid: uid, titleText: "Sticky Note" },
+        resizeObservers,
+        blockUnmounts,
+      });
+      container.append(note);
+      focusStickyRenderedUidWithRetries({ uid: firstContentUid, root: note });
+    } catch (error) {
+      if (uid) {
+        try {
+          await window.roamAlphaAPI.deleteBlock({ block: { uid } });
+        } catch (rollbackError) {
+          logRoamMutationError({
+            operation: "deleteBlock",
+            uid,
+            error: rollbackError,
+          });
+        }
+        delete layouts[uid];
+        setLayouts(layouts);
+      }
+      console.error("[sticky-note] Failed to create sticky note", error);
+      throw error;
+    }
   };
 
   await extensionAPI.ui.commandPalette.addCommand({
