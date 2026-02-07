@@ -43,6 +43,18 @@ const NOTE_CLASS = "roamjs-sticky-note";
 const NOTE_MINIMIZED_CLASS = "roamjs-sticky-note--minimized";
 const NOTE_DRAGGING_CLASS = "roamjs-sticky-note--dragging";
 
+const logRoamMutationError = ({
+  operation,
+  uid,
+  error,
+}: {
+  operation: "updateBlock" | "deleteBlock";
+  uid: string;
+  error: unknown;
+}): void => {
+  console.error(`[sticky-note] Failed to ${operation} for block ${uid}`, error);
+};
+
 const randomRotation = (): number =>
   Math.round((Math.random() * 3 - 1.5) * 10) / 10;
 
@@ -121,9 +133,13 @@ const ensureStickyNoteMeta = async (noteUid: string): Promise<StickyNoteMeta> =>
     };
   }
 
-  window.roamAlphaAPI.updateBlock({
-    block: { uid: noteUid, string: "Sticky Note" },
-  });
+  try {
+    await window.roamAlphaAPI.updateBlock({
+      block: { uid: noteUid, string: "Sticky Note" },
+    });
+  } catch (error) {
+    logRoamMutationError({ operation: "updateBlock", uid: noteUid, error });
+  }
   return {
     titleUid: noteUid,
     titleText: "Sticky Note",
@@ -377,9 +393,17 @@ const createStickyNoteElement = ({
       title.value = nextTitle;
     }
     syncTitleWidth();
-    window.roamAlphaAPI.updateBlock({
-      block: { uid: meta.titleUid, string: nextTitle },
-    });
+    void window.roamAlphaAPI
+      .updateBlock({
+        block: { uid: meta.titleUid, string: nextTitle },
+      })
+      .catch((error) => {
+        logRoamMutationError({
+          operation: "updateBlock",
+          uid: meta.titleUid,
+          error,
+        });
+      });
   };
 
   title.addEventListener("input", syncTitleWidth);
@@ -467,7 +491,16 @@ const createStickyNoteElement = ({
   resizeObservers.add(resizeObserver);
   resizeObserver.observe(note);
 
-  deleteButton.addEventListener("click", () => {
+  deleteButton.addEventListener("click", async () => {
+    deleteButton.disabled = true;
+    try {
+      await window.roamAlphaAPI.deleteBlock({ block: { uid } });
+    } catch (error) {
+      deleteButton.disabled = false;
+      logRoamMutationError({ operation: "deleteBlock", uid, error });
+      return;
+    }
+
     resizeObserver.disconnect();
     resizeObservers.delete(resizeObserver);
     cleanupEmbeddedBlock();
@@ -475,7 +508,6 @@ const createStickyNoteElement = ({
     note.remove();
     delete layouts[uid];
     setLayouts(layouts);
-    window.roamAlphaAPI.deleteBlock({ block: { uid } });
   });
 
   return note;
