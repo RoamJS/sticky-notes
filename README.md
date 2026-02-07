@@ -8,6 +8,8 @@
 
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/RoamJS/sticky-notes)
 
+<video src="https://github.com/user-attachments/assets/109573cd-fbff-44e2-ad82-c5cfa64bd180" controls muted playsinline width="100%"></video>
+
 ## What are Sticky Notes?
 
 Sticky Notes are lightweight notes that sit in a layer above your Roam graph. They're meant for **quick, temporary capture**: ideas you're playing with, reminders for the current session, or scratch space while you work. When you delete a sticky note, it's gone—the block is removed from your graph. No archive, no cleanup later.
