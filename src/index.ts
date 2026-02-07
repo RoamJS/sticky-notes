@@ -737,6 +737,11 @@ export default runExtension(async ({ extensionAPI }) => {
     });
     container.append(note);
   }
+  for (const key of Object.keys(layouts)) {
+    if (!existingUids.includes(key)) {
+      delete layouts[key];
+    }
+  }
   setLayouts(layouts);
 
   const createStickyNote = async (): Promise<void> => {
