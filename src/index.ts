@@ -8,25 +8,48 @@ type StickyNoteLayout = {
   width: number;
   height: number;
   minimized: boolean;
+  rotation: number;
 };
 
 type StickyNoteLayouts = Record<string, StickyNoteLayout>;
-type BlockChild = {
-  uid: string;
-  text: string;
-};
 
 type StickyNoteMeta = {
   titleUid: string;
   titleText: string;
-  contentUids: string[];
 };
 
-const PAGE_TITLE = "Roam/js/sticky-note";
+type ReactLike = {
+  createElement: (component: unknown, props: Record<string, unknown>) => unknown;
+};
+
+type ReactDomLike = {
+  render: (element: unknown, container: Element) => void;
+  unmountComponentAtNode: (container: Element) => boolean;
+};
+
+type RoamReactApi = {
+  Block: (props: {
+    uid: string;
+    open?: boolean;
+    zoomPath?: boolean;
+    zoomStartAfterUid?: string;
+  }) => unknown;
+};
+
+const PAGE_TITLE = "roam/js/sticky-note";
 const STORAGE_KEY = "roam-sticky-note-layouts";
 const COMMAND_LABEL = "Create Sticky Note";
-const NOTE_CLASS = "roam-sticky-note";
-const NOTE_MINIMIZED_CLASS = "roam-sticky-note--minimized";
+const NOTE_CLASS = "roamjs-sticky-note";
+const NOTE_MINIMIZED_CLASS = "roamjs-sticky-note--minimized";
+const NOTE_DRAGGING_CLASS = "roamjs-sticky-note--dragging";
+
+const randomRotation = (): number =>
+  Math.round((Math.random() * 3 - 1.5) * 10) / 10;
+
+const normalizeLayout = (layout: StickyNoteLayout): StickyNoteLayout => ({
+  ...layout,
+  rotation: Number.isFinite(layout.rotation) ? layout.rotation : randomRotation(),
+});
 
 const getLayouts = (): StickyNoteLayouts => {
   const raw = window.localStorage.getItem(STORAGE_KEY);
@@ -35,7 +58,9 @@ const getLayouts = (): StickyNoteLayouts => {
   }
   try {
     const parsed = JSON.parse(raw) as StickyNoteLayouts;
-    return parsed;
+    return Object.fromEntries(
+      Object.entries(parsed).map(([uid, layout]) => [uid, normalizeLayout(layout)])
+    );
   } catch {
     return {};
   }
@@ -74,23 +99,6 @@ const fetchStickyNoteUids = (): string[] => {
     .map((entry) => entry[0]);
 };
 
-const fetchBlockChildren = (uid: string): BlockChild[] => {
-  const result = window.roamAlphaAPI.q(
-    `[:find ?childUid ?text ?order
-      :in $ ?uid
-      :where
-        [?b :block/uid ?uid]
-        [?b :block/children ?c]
-        [?c :block/uid ?childUid]
-        [(get-else $ ?c :block/string "") ?text]
-        [?c :block/order ?order]]`,
-    uid
-  ) as [string, string, number][];
-  return result
-    .sort((a, b) => a[2] - b[2])
-    .map(([childUid, text]) => ({ uid: childUid, text }));
-};
-
 const fetchBlockText = (uid: string): string => {
   const result = window.roamAlphaAPI.q(
     `[:find ?text
@@ -105,22 +113,11 @@ const fetchBlockText = (uid: string): string => {
 
 const ensureStickyNoteMeta = async (noteUid: string): Promise<StickyNoteMeta> => {
   const noteText = fetchBlockText(noteUid).trim();
-  const children = fetchBlockChildren(noteUid);
 
   if (noteText) {
     return {
       titleUid: noteUid,
       titleText: noteText,
-      contentUids: children.map((c) => c.uid),
-    };
-  }
-
-  const legacyTitleChild = children[0];
-  if (legacyTitleChild) {
-    return {
-      titleUid: legacyTitleChild.uid,
-      titleText: legacyTitleChild.text || "Sticky Note",
-      contentUids: children.slice(1).map((c) => c.uid),
     };
   }
 
@@ -130,7 +127,33 @@ const ensureStickyNoteMeta = async (noteUid: string): Promise<StickyNoteMeta> =>
   return {
     titleUid: noteUid,
     titleText: "Sticky Note",
-    contentUids: [],
+  };
+};
+
+const mountRoamBlock = ({
+  uid,
+  el,
+  open,
+}: {
+  uid: string;
+  el: HTMLElement;
+  open?: boolean;
+}): (() => void) => {
+  const globalWindow = window as unknown as {
+    React?: ReactLike;
+    ReactDOM?: ReactDomLike;
+    roamAlphaAPI?: { ui?: { react?: RoamReactApi } };
+  };
+  const React = globalWindow.React;
+  const ReactDOM = globalWindow.ReactDOM;
+  const Block = globalWindow.roamAlphaAPI?.ui?.react?.Block;
+  if (!React || !ReactDOM || !Block) {
+    return () => undefined;
+  }
+
+  ReactDOM.render(React.createElement(Block, { uid, open }), el);
+  return () => {
+    ReactDOM.unmountComponentAtNode(el);
   };
 };
 
@@ -150,6 +173,7 @@ const defaultLayout = (
     width,
     height,
     minimized: false,
+    rotation: randomRotation(),
   };
 };
 
@@ -161,6 +185,7 @@ const applyLayout = (
   note.style.top = `${layout.y}px`;
   note.style.width = `${layout.width}px`;
   note.style.height = `${layout.height}px`;
+  note.style.transform = `rotate(${layout.rotation}deg)`;
   note.classList.toggle(NOTE_MINIMIZED_CLASS, layout.minimized);
 };
 
@@ -183,12 +208,14 @@ const createStickyNoteElement = ({
   layouts,
   meta,
   resizeObservers,
+  blockUnmounts,
 }: {
   uid: string;
   layout: StickyNoteLayout;
   layouts: StickyNoteLayouts;
   meta: StickyNoteMeta;
   resizeObservers: Set<ResizeObserver>;
+  blockUnmounts: Set<() => void>;
 }): HTMLDivElement => {
   const note = document.createElement("div");
   note.className = NOTE_CLASS;
@@ -196,20 +223,35 @@ const createStickyNoteElement = ({
   applyLayout(note, layout);
 
   const header = document.createElement("div");
-  header.className = "roam-sticky-note__header";
+  header.className = "roamjs-sticky-note__header";
 
   const title = document.createElement("input");
-  title.className = "roam-sticky-note__title";
+  title.className = "roamjs-sticky-note__title";
   title.type = "text";
   title.value = meta.titleText || "Sticky Note";
   title.setAttribute("aria-label", "Sticky note title");
+  const measureTitleWidth = (value: string): number => {
+    const text = value.trim() || "Sticky Note";
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      return Math.max(36, text.length * 8);
+    }
+    const computed = window.getComputedStyle(title);
+    ctx.font = `${computed.fontWeight} ${computed.fontSize} ${computed.fontFamily}`;
+    return Math.max(36, Math.ceil(ctx.measureText(text).width) + 10);
+  };
+  const syncTitleWidth = (): void => {
+    title.style.width = `${measureTitleWidth(title.value)}px`;
+  };
+  syncTitleWidth();
 
   const actions = document.createElement("div");
-  actions.className = "roam-sticky-note__actions";
+  actions.className = "roamjs-sticky-note__actions";
 
   const minimizeButton = document.createElement("button");
   minimizeButton.type = "button";
-  minimizeButton.className = "bp3-button bp3-minimal roam-sticky-note__button";
+  minimizeButton.className = "bp3-button bp3-minimal roamjs-sticky-note__button";
   minimizeButton.setAttribute(
     "aria-label",
     layout.minimized ? "Expand sticky note" : "Minimize sticky note"
@@ -218,7 +260,7 @@ const createStickyNoteElement = ({
 
   const deleteButton = document.createElement("button");
   deleteButton.type = "button";
-  deleteButton.className = "bp3-button bp3-minimal roam-sticky-note__button";
+  deleteButton.className = "bp3-button bp3-minimal roamjs-sticky-note__button";
   deleteButton.setAttribute("aria-label", "Delete sticky note");
   deleteButton.textContent = "✕";
 
@@ -226,29 +268,46 @@ const createStickyNoteElement = ({
   header.append(title, actions);
 
   const content = document.createElement("div");
-  content.className = "roam-sticky-note__content";
+  content.className = "roamjs-sticky-note__content";
 
   note.append(header, content);
+  syncTitleWidth();
+  window.requestAnimationFrame(syncTitleWidth);
+  window.setTimeout(syncTitleWidth, 80);
 
-  meta.contentUids.forEach((contentUid) => {
-    const blockContainer = document.createElement("div");
-    content.append(blockContainer);
-    window.roamAlphaAPI.ui.components.renderBlock({
-      uid: contentUid,
-      el: blockContainer,
-    });
-  });
+  const blockContainer = document.createElement("div");
+  blockContainer.className = "roamjs-sticky-note__embedded-root";
+  content.append(blockContainer);
+  const unmountBlock = mountRoamBlock({ uid, el: blockContainer, open: true });
+  const hideEmbeddedRootTitle = (): void => {
+    const rootMain = blockContainer.querySelector(
+      ".rm-level-0 > .rm-block-main, .rm-block-main"
+    ) as HTMLElement | null;
+    if (rootMain) {
+      rootMain.style.display = "none";
+    }
+  };
+  hideEmbeddedRootTitle();
+  const embedObserver = new MutationObserver(() => hideEmbeddedRootTitle());
+  embedObserver.observe(blockContainer, { childList: true, subtree: true });
+  const cleanupEmbeddedBlock = (): void => {
+    embedObserver.disconnect();
+    unmountBlock();
+  };
+  blockUnmounts.add(cleanupEmbeddedBlock);
 
   const commitTitle = (): void => {
     const nextTitle = title.value.trim() || "Sticky Note";
     if (title.value !== nextTitle) {
       title.value = nextTitle;
     }
+    syncTitleWidth();
     window.roamAlphaAPI.updateBlock({
       block: { uid: meta.titleUid, string: nextTitle },
     });
   };
 
+  title.addEventListener("input", syncTitleWidth);
   title.addEventListener("blur", commitTitle);
   title.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
@@ -260,6 +319,7 @@ const createStickyNoteElement = ({
   let dragOffsetX = 0;
   let dragOffsetY = 0;
   let isDragging = false;
+  let previousBodyUserSelect = "";
 
   const onPointerMove = (event: PointerEvent): void => {
     if (!isDragging) {
@@ -277,17 +337,23 @@ const createStickyNoteElement = ({
       return;
     }
     isDragging = false;
+    note.classList.remove(NOTE_DRAGGING_CLASS);
+    document.body.style.userSelect = previousBodyUserSelect;
     document.removeEventListener("pointermove", onPointerMove);
     document.removeEventListener("pointerup", onPointerUp);
   };
 
   const onPointerDown = (event: PointerEvent): void => {
-    if ((event.target as HTMLElement).closest("button")) {
+    const target = event.target as HTMLElement;
+    if (target.closest("button, input, textarea, [contenteditable='true']")) {
       return;
     }
     isDragging = true;
     dragOffsetX = event.clientX - note.offsetLeft;
     dragOffsetY = event.clientY - note.offsetTop;
+    note.classList.add(NOTE_DRAGGING_CLASS);
+    previousBodyUserSelect = document.body.style.userSelect;
+    document.body.style.userSelect = "none";
     document.addEventListener("pointermove", onPointerMove);
     document.addEventListener("pointerup", onPointerUp);
   };
@@ -303,6 +369,10 @@ const createStickyNoteElement = ({
       nextMinimized ? "Expand sticky note" : "Minimize sticky note"
     );
     updateLayout(layouts, uid, { minimized: nextMinimized });
+    window.requestAnimationFrame(() => {
+      const activeElement = document.activeElement as HTMLElement | null;
+      activeElement?.blur();
+    });
   });
 
   const resizeObserver = new ResizeObserver((entries) => {
@@ -325,6 +395,8 @@ const createStickyNoteElement = ({
   deleteButton.addEventListener("click", () => {
     resizeObserver.disconnect();
     resizeObservers.delete(resizeObserver);
+    cleanupEmbeddedBlock();
+    blockUnmounts.delete(cleanupEmbeddedBlock);
     note.remove();
     delete layouts[uid];
     setLayouts(layouts);
@@ -366,6 +438,12 @@ export default runExtension(async ({ extensionAPI }) => {
       min-height: 160px;
       pointer-events: auto;
       z-index: 1000;
+      transition: box-shadow 120ms ease;
+      transform-origin: center center;
+    }
+
+    .${NOTE_DRAGGING_CLASS} {
+      box-shadow: 0 14px 28px rgba(0, 0, 0, 0.32);
     }
 
     .${NOTE_CLASS}::after {
@@ -377,7 +455,7 @@ export default runExtension(async ({ extensionAPI }) => {
       box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35);
     }
 
-    .${NOTE_CLASS} .roam-sticky-note__header {
+    .${NOTE_CLASS} .roamjs-sticky-note__header {
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -389,61 +467,98 @@ export default runExtension(async ({ extensionAPI }) => {
       background: rgba(255, 255, 255, 0.4);
     }
 
-    .${NOTE_CLASS} .roam-sticky-note__header:active {
+    .${NOTE_CLASS} .roamjs-sticky-note__header:active {
       cursor: grabbing;
     }
 
-    .${NOTE_CLASS} .roam-sticky-note__title {
+    .${NOTE_CLASS} .roamjs-sticky-note__title {
       font-size: 13px;
       font-weight: 600;
       color: #5a4b1d;
       background: transparent;
       border: none;
       outline: none;
-      width: 100%;
+      flex: 0 0 auto;
       min-width: 0;
+      max-width: calc(100% - 60px);
       margin-right: 8px;
-      padding: 0;
+      padding: 0 1px;
+      box-sizing: border-box;
     }
 
-    .${NOTE_CLASS} .roam-sticky-note__title:focus {
+    .${NOTE_CLASS} .roamjs-sticky-note__title:focus {
       background: rgba(255, 255, 255, 0.55);
       border-radius: 4px;
-      padding: 0 4px;
     }
 
-    .${NOTE_CLASS} .roam-sticky-note__actions {
+    .${NOTE_CLASS} .roamjs-sticky-note__actions {
       display: flex;
       gap: 4px;
     }
 
-    .${NOTE_CLASS} .roam-sticky-note__button {
+    .${NOTE_CLASS} .roamjs-sticky-note__button {
       min-width: 24px;
       height: 24px;
       padding: 0;
       color: #5a4b1d;
     }
 
-    .${NOTE_CLASS} .roam-sticky-note__content {
+    .${NOTE_CLASS} .roamjs-sticky-note__content {
       padding: 6px 10px 12px;
       flex: 1;
       overflow: auto;
     }
 
+    .${NOTE_CLASS} .roamjs-sticky-note__embedded-root {
+      width: 100%;
+      min-width: 0;
+    }
+
+    .${NOTE_CLASS} .roamjs-sticky-note__embedded-root > .roam-block-container {
+      width: 100%;
+      min-width: 0;
+    }
+
+    .${NOTE_CLASS} .roamjs-sticky-note__embedded-root > .roam-block-container > .rm-block-main {
+      display: none;
+    }
+
+    .${NOTE_CLASS} .roamjs-sticky-note__embedded-root .roam-block-container > .rm-block-children.rm-level-1 {
+      margin-left: 0 !important;
+    }
+
+    .${NOTE_CLASS} .roamjs-sticky-note__embedded-root .roam-block-container,
+    .${NOTE_CLASS} .roamjs-sticky-note__embedded-root .rm-level-0,
+    .${NOTE_CLASS} .roamjs-sticky-note__embedded-root .rm-block-main,
+    .${NOTE_CLASS} .roamjs-sticky-note__embedded-root .roam-block {
+      width: 100%;
+      min-width: 0;
+      max-width: 100%;
+    }
+
+    .${NOTE_CLASS} .roamjs-sticky-note__embedded-root .rm-block-separator {
+      display: none;
+    }
+
+    .${NOTE_CLASS} .roamjs-sticky-note__embedded-root .rm-multibar {
+      display: none;
+    }
+
     .${NOTE_MINIMIZED_CLASS} {
       height: auto !important;
+      min-height: 0 !important;
       resize: none;
     }
 
-    .${NOTE_MINIMIZED_CLASS} .roam-sticky-note__content {
+    .${NOTE_MINIMIZED_CLASS} .roamjs-sticky-note__content {
       display: none;
     }
   `,
-    "roam-sticky-note-style"
+    "roamjs-sticky-note-style"
   );
 
   const container = document.createElement("div");
-  container.id = "roam-sticky-note-container";
+  container.id = "roamjs-sticky-note-container";
   container.style.position = "fixed";
   container.style.left = "0";
   container.style.top = "0";
@@ -454,6 +569,7 @@ export default runExtension(async ({ extensionAPI }) => {
 
   const layouts = getLayouts();
   const resizeObservers = new Set<ResizeObserver>();
+  const blockUnmounts = new Set<() => void>();
   const pageUid = await ensurePageUid();
   const existingUids = fetchStickyNoteUids();
 
@@ -469,6 +585,7 @@ export default runExtension(async ({ extensionAPI }) => {
       layouts,
       meta,
       resizeObservers,
+      blockUnmounts,
     });
     container.append(note);
   }
@@ -480,7 +597,7 @@ export default runExtension(async ({ extensionAPI }) => {
       order: "last",
       node: { text: "Sticky Note" },
     });
-    const contentUid = await createBlock({
+    await createBlock({
       parentUid: uid,
       order: 0,
       node: { text: " " },
@@ -496,8 +613,9 @@ export default runExtension(async ({ extensionAPI }) => {
       uid,
       layout,
       layouts,
-      meta: { titleUid: uid, titleText: "Sticky Note", contentUids: [contentUid] },
+      meta: { titleUid: uid, titleText: "Sticky Note" },
       resizeObservers,
+      blockUnmounts,
     });
     container.append(note);
   };
@@ -513,6 +631,8 @@ export default runExtension(async ({ extensionAPI }) => {
     unload: () => {
       resizeObservers.forEach((observer) => observer.disconnect());
       resizeObservers.clear();
+      blockUnmounts.forEach((unmount) => unmount());
+      blockUnmounts.clear();
       container.remove();
     },
   };
