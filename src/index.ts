@@ -576,7 +576,7 @@ export default runExtension(async ({ extensionAPI }) => {
       min-width: 180px;
       min-height: 160px;
       pointer-events: auto;
-      z-index: 1000;
+      z-index: 1;
       transition: box-shadow 120ms ease;
       transform-origin: center center;
     }
@@ -712,6 +712,7 @@ export default runExtension(async ({ extensionAPI }) => {
   container.style.width = "100%";
   container.style.height = "100%";
   container.style.pointerEvents = "none";
+  container.style.zIndex = "2147483000";
   document.body.append(container);
 
   const layouts = getLayouts();
