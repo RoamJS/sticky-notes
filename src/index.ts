@@ -476,7 +476,6 @@ const createStickyNoteElement = ({
     document.removeEventListener("pointercancel", stopDragging);
     window.removeEventListener("blur", stopDragging);
     persistLayouts();
-    console.log("[sticky-note] drag end settings", readLayoutsSetting());
   };
 
   const onPointerDown = (event: PointerEvent): void => {
@@ -826,7 +825,6 @@ export default runExtension(async ({ extensionAPI }) => {
         delete layouts[uid];
         persistLayouts();
       }
-      console.error("[sticky-note] Failed to create sticky note", error);
       throw error;
     }
   };
