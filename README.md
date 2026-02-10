@@ -8,7 +8,7 @@
 
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/RoamJS/sticky-notes)
 
-<video src="https://github.com/user-attachments/assets/109573cd-fbff-44e2-ad82-c5cfa64bd180" controls muted playsinline width="100%"></video>
+<video src="https://firebasestorage.googleapis.com/v0/b/firescript-577a2.appspot.com/o/imgs%2Fapp%2Froamjs%2FjVlEuX3hF6.mp4?alt=media" controls muted playsinline width="100%"></video>
 
 ## What are Sticky Notes?
 
