@@ -102,10 +102,11 @@ const setLayouts = ({
 };
 
 const getPageUid = (): string | null => {
-  const result = window.roamAlphaAPI.q(
-    `[:find ?uid :where [?p :node/title "${PAGE_TITLE}"] [?p :block/uid ?uid]]`,
-  ) as [string][];
-  return result.length ? result[0][0] : null;
+  const page = window.roamAlphaAPI.pull("[:block/uid]", [
+    ":node/title",
+    PAGE_TITLE,
+  ]) as { ":block/uid"?: string } | null;
+  return page?.[":block/uid"] || null;
 };
 
 const ensurePageUid = async (): Promise<string> => {
