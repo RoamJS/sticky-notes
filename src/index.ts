@@ -1,4 +1,5 @@
 import addStyle from "roamjs-components/dom/addStyle";
+import { OnloadArgs } from "roamjs-components/types";
 import runExtension from "roamjs-components/util/runExtension";
 import { createBlock, createPage } from "roamjs-components/writes";
 
@@ -19,7 +20,10 @@ type StickyNoteMeta = {
 };
 
 type ReactLike = {
-  createElement: (component: unknown, props: Record<string, unknown>) => unknown;
+  createElement: (
+    component: unknown,
+    props: Record<string, unknown>,
+  ) => unknown;
 };
 
 type ReactDomLike = {
@@ -60,31 +64,46 @@ const randomRotation = (): number =>
 
 const normalizeLayout = (layout: StickyNoteLayout): StickyNoteLayout => ({
   ...layout,
-  rotation: Number.isFinite(layout.rotation) ? layout.rotation : randomRotation(),
+  rotation: Number.isFinite(layout.rotation)
+    ? layout.rotation
+    : randomRotation(),
 });
 
-const getLayouts = (): StickyNoteLayouts => {
-  const raw = window.localStorage.getItem(STORAGE_KEY);
-  if (!raw) {
+const getLayouts = ({
+  extensionSettings,
+}: {
+  extensionSettings: OnloadArgs["extensionAPI"]["settings"];
+}): StickyNoteLayouts => {
+  const raw = extensionSettings.get(STORAGE_KEY);
+  if (typeof raw !== "string" || !raw) {
     return {};
   }
   try {
     const parsed = JSON.parse(raw) as StickyNoteLayouts;
     return Object.fromEntries(
-      Object.entries(parsed).map(([uid, layout]) => [uid, normalizeLayout(layout)])
+      Object.entries(parsed).map(([uid, layout]) => [
+        uid,
+        normalizeLayout(layout),
+      ]),
     );
   } catch {
     return {};
   }
 };
 
-const setLayouts = (layouts: StickyNoteLayouts): void => {
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(layouts));
+const setLayouts = ({
+  extensionSettings,
+  layouts,
+}: {
+  extensionSettings: OnloadArgs["extensionAPI"]["settings"];
+  layouts: StickyNoteLayouts;
+}): void => {
+  extensionSettings.set(STORAGE_KEY, JSON.stringify(layouts));
 };
 
 const getPageUid = (): string | null => {
   const result = window.roamAlphaAPI.q(
-    `[:find ?uid :where [?p :node/title "${PAGE_TITLE}"] [?p :block/uid ?uid]]`
+    `[:find ?uid :where [?p :node/title "${PAGE_TITLE}"] [?p :block/uid ?uid]]`,
   ) as [string][];
   return result.length ? result[0][0] : null;
 };
@@ -104,11 +123,9 @@ const fetchStickyNoteUids = (): string[] => {
         [?p :node/title "${PAGE_TITLE}"]
         [?p :block/children ?c]
         [?c :block/uid ?uid]
-        [?c :block/order ?order]]`
+        [?c :block/order ?order]]`,
   ) as [string, number][];
-  return result
-    .sort((a, b) => a[1] - b[1])
-    .map((entry) => entry[0]);
+  return result.sort((a, b) => a[1] - b[1]).map((entry) => entry[0]);
 };
 
 const fetchBlockText = (uid: string): string => {
@@ -118,12 +135,14 @@ const fetchBlockText = (uid: string): string => {
       :where
         [?b :block/uid ?uid]
         [(get-else $ ?b :block/string "") ?text]]`,
-    uid
+    uid,
   ) as [string][];
   return result.length ? result[0][0] : "";
 };
 
-const ensureStickyNoteMeta = async (noteUid: string): Promise<StickyNoteMeta> => {
+const ensureStickyNoteMeta = async (
+  noteUid: string,
+): Promise<StickyNoteMeta> => {
   const noteText = fetchBlockText(noteUid).trim();
 
   if (noteText) {
@@ -176,7 +195,7 @@ const mountRoamBlock = ({
 const defaultLayout = (
   index: number,
   viewportWidth: number,
-  viewportHeight: number
+  viewportHeight: number,
 ): StickyNoteLayout => {
   const width = 240;
   const height = 220;
@@ -193,10 +212,7 @@ const defaultLayout = (
   };
 };
 
-const applyLayout = (
-  note: HTMLElement,
-  layout: StickyNoteLayout
-): void => {
+const applyLayout = (note: HTMLElement, layout: StickyNoteLayout): void => {
   note.style.left = `${layout.x}px`;
   note.style.top = `${layout.y}px`;
   note.style.width = `${layout.width}px`;
@@ -208,7 +224,7 @@ const applyLayout = (
 const mutateLayout = (
   layouts: StickyNoteLayouts,
   uid: string,
-  next: Partial<StickyNoteLayout>
+  next: Partial<StickyNoteLayout>,
 ): void => {
   const current = layouts[uid];
   layouts[uid] = {
@@ -225,7 +241,7 @@ const getStickyRenderedIdFromUid = ({
   root?: ParentNode;
 }): string | null => {
   const el = root.querySelector(
-    `.roamjs-sticky-note__embedded-root [id^="block-input-"][id$="-${uid}"]`
+    `.roamjs-sticky-note__embedded-root [id^="block-input-"][id$="-${uid}"]`,
   ) as HTMLElement | null;
   return el?.id || null;
 };
@@ -296,6 +312,8 @@ const createStickyNoteElement = ({
   uid,
   layout,
   layouts,
+  persistLayouts,
+  readLayoutsSetting,
   meta,
   resizeObservers,
   blockUnmounts,
@@ -303,6 +321,8 @@ const createStickyNoteElement = ({
   uid: string;
   layout: StickyNoteLayout;
   layouts: StickyNoteLayouts;
+  persistLayouts: () => void;
+  readLayoutsSetting: () => unknown;
   meta: StickyNoteMeta;
   resizeObservers: Set<ResizeObserver>;
   blockUnmounts: Set<() => void>;
@@ -341,10 +361,11 @@ const createStickyNoteElement = ({
 
   const minimizeButton = document.createElement("button");
   minimizeButton.type = "button";
-  minimizeButton.className = "bp3-button bp3-minimal roamjs-sticky-note__button";
+  minimizeButton.className =
+    "bp3-button bp3-minimal roamjs-sticky-note__button";
   minimizeButton.setAttribute(
     "aria-label",
-    layout.minimized ? "Expand sticky note" : "Minimize sticky note"
+    layout.minimized ? "Expand sticky note" : "Minimize sticky note",
   );
   minimizeButton.textContent = layout.minimized ? "▢" : "–";
 
@@ -371,7 +392,7 @@ const createStickyNoteElement = ({
   const unmountBlock = mountRoamBlock({ uid, el: blockContainer, open: true });
   const hideEmbeddedRootTitle = (): void => {
     const rootMain = blockContainer.querySelector(
-      ".rm-level-0 > .rm-block-main, .rm-block-main"
+      ".rm-level-0 > .rm-block-main, .rm-block-main",
     ) as HTMLElement | null;
     if (rootMain) {
       rootMain.style.display = "none";
@@ -426,7 +447,7 @@ const createStickyNoteElement = ({
     }
     resizePersistTimeout = window.setTimeout(() => {
       resizePersistTimeout = null;
-      setLayouts(layouts);
+      persistLayouts();
     }, 250);
   };
 
@@ -439,9 +460,10 @@ const createStickyNoteElement = ({
     note.style.left = `${x}px`;
     note.style.top = `${y}px`;
     mutateLayout(layouts, uid, { x, y });
+    scheduleLayoutPersistence();
   };
 
-  const onPointerUp = (): void => {
+  const stopDragging = (): void => {
     if (!isDragging) {
       return;
     }
@@ -449,8 +471,11 @@ const createStickyNoteElement = ({
     note.classList.remove(NOTE_DRAGGING_CLASS);
     document.body.style.userSelect = previousBodyUserSelect;
     document.removeEventListener("pointermove", onPointerMove);
-    document.removeEventListener("pointerup", onPointerUp);
-    setLayouts(layouts);
+    document.removeEventListener("pointerup", stopDragging);
+    document.removeEventListener("pointercancel", stopDragging);
+    window.removeEventListener("blur", stopDragging);
+    persistLayouts();
+    console.log("[sticky-note] drag end settings", readLayoutsSetting());
   };
 
   const onPointerDown = (event: PointerEvent): void => {
@@ -465,7 +490,9 @@ const createStickyNoteElement = ({
     previousBodyUserSelect = document.body.style.userSelect;
     document.body.style.userSelect = "none";
     document.addEventListener("pointermove", onPointerMove);
-    document.addEventListener("pointerup", onPointerUp);
+    document.addEventListener("pointerup", stopDragging);
+    document.addEventListener("pointercancel", stopDragging);
+    window.addEventListener("blur", stopDragging);
   };
 
   header.addEventListener("pointerdown", onPointerDown);
@@ -476,10 +503,10 @@ const createStickyNoteElement = ({
     minimizeButton.textContent = nextMinimized ? "▢" : "–";
     minimizeButton.setAttribute(
       "aria-label",
-      nextMinimized ? "Expand sticky note" : "Minimize sticky note"
+      nextMinimized ? "Expand sticky note" : "Minimize sticky note",
     );
     mutateLayout(layouts, uid, { minimized: nextMinimized });
-    setLayouts(layouts);
+    persistLayouts();
     window.requestAnimationFrame(() => {
       const activeElement = document.activeElement as HTMLElement | null;
       activeElement?.blur();
@@ -524,7 +551,7 @@ const createStickyNoteElement = ({
     blockUnmounts.delete(cleanupEmbeddedBlock);
     note.remove();
     delete layouts[uid];
-    setLayouts(layouts);
+    persistLayouts();
   });
 
   return note;
@@ -701,7 +728,7 @@ export default runExtension(async ({ extensionAPI }) => {
       display: none;
     }
   `,
-    "roamjs-sticky-note-style"
+    "roamjs-sticky-note-style",
   );
 
   const container = document.createElement("div");
@@ -715,7 +742,10 @@ export default runExtension(async ({ extensionAPI }) => {
   container.style.zIndex = "19";
   document.body.append(container);
 
-  const layouts = getLayouts();
+  const extensionSettings = extensionAPI.settings;
+  const layouts = getLayouts({ extensionSettings });
+  const persistLayouts = (): void => setLayouts({ extensionSettings, layouts });
+  const readLayoutsSetting = (): unknown => extensionSettings.get(STORAGE_KEY);
   const resizeObservers = new Set<ResizeObserver>();
   const blockUnmounts = new Set<() => void>();
   await ensurePageUid();
@@ -731,6 +761,8 @@ export default runExtension(async ({ extensionAPI }) => {
       uid,
       layout,
       layouts,
+      persistLayouts,
+      readLayoutsSetting,
       meta,
       resizeObservers,
       blockUnmounts,
@@ -742,7 +774,7 @@ export default runExtension(async ({ extensionAPI }) => {
       delete layouts[key];
     }
   }
-  setLayouts(layouts);
+  persistLayouts();
 
   const createStickyNote = async (): Promise<void> => {
     const pageUid = await ensurePageUid();
@@ -763,14 +795,16 @@ export default runExtension(async ({ extensionAPI }) => {
       const layout = defaultLayout(
         Object.keys(layouts).length,
         window.innerWidth,
-        window.innerHeight
+        window.innerHeight,
       );
       layouts[uid] = layout;
-      setLayouts(layouts);
+      persistLayouts();
       const note = createStickyNoteElement({
         uid,
         layout,
         layouts,
+        persistLayouts,
+        readLayoutsSetting,
         meta: { titleUid: uid, titleText: "Sticky Note" },
         resizeObservers,
         blockUnmounts,
@@ -789,7 +823,7 @@ export default runExtension(async ({ extensionAPI }) => {
           });
         }
         delete layouts[uid];
-        setLayouts(layouts);
+        persistLayouts();
       }
       console.error("[sticky-note] Failed to create sticky note", error);
       throw error;
