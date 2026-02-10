@@ -475,6 +475,10 @@ const createStickyNoteElement = ({
     document.removeEventListener("pointerup", stopDragging);
     document.removeEventListener("pointercancel", stopDragging);
     window.removeEventListener("blur", stopDragging);
+    if (resizePersistTimeout) {
+      window.clearTimeout(resizePersistTimeout);
+      resizePersistTimeout = null;
+    }
     persistLayouts();
   };
 
