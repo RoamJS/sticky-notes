@@ -1,6 +1,6 @@
 {
   "name": "sticky-notes",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Sticky Notes Extension for Roam Research",
   "main": "index.js",
   "scripts": {
