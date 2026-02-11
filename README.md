@@ -8,7 +8,7 @@
 
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/RoamJS/sticky-notes)
 
-<img width="1681" height="1093" alt="image" src="https://github.com/user-attachments/assets/42328dfa-04d5-4a92-bdac-ac824758c213" />
+![](https://github.com/user-attachments/assets/42328dfa-04d5-4a92-bdac-ac824758c213")
 
 ## What are Sticky Notes?
 

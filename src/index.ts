@@ -577,21 +577,6 @@ export default runExtension(async ({ extensionAPI }) => {
     focusStickyRenderedUidWithRetries,
   };
 
-  extensionAPI.settings.panel.create({
-    tabTitle: "Extension",
-    settings: [
-      {
-        id: "enabled",
-        name: "Enable",
-        description: "Turn the extension on or off",
-        action: { type: "switch" },
-      },
-    ],
-  });
-
-  const enabled = extensionAPI.settings.get("enabled") as boolean | undefined;
-  if (enabled === false) return;
-
   const style = addStyle(
     `
     .${NOTE_CLASS} {
