@@ -1,238 +1,31 @@
 import addStyle from "roamjs-components/dom/addStyle";
-import { OnloadArgs } from "roamjs-components/types";
 import runExtension from "roamjs-components/util/runExtension";
-import { createBlock, createPage } from "roamjs-components/writes";
+import { createBlock } from "roamjs-components/writes";
 
-type StickyNoteLayout = {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  minimized: boolean;
-  rotation: number;
-};
-
-type StickyNoteLayouts = Record<string, StickyNoteLayout>;
-
-type StickyNoteMeta = {
-  titleUid: string;
-  titleText: string;
-};
-
-type ReactLike = {
-  createElement: (
-    component: unknown,
-    props: Record<string, unknown>,
-  ) => unknown;
-};
-
-type ReactDomLike = {
-  render: (element: unknown, container: Element) => void;
-  unmountComponentAtNode: (container: Element) => boolean;
-};
-
-type RoamReactApi = {
-  Block: (props: {
-    uid: string;
-    open?: boolean;
-    zoomPath?: boolean;
-    zoomStartAfterUid?: string;
-  }) => unknown;
-};
-
-const PAGE_TITLE = "roam/js/sticky-note";
-const STORAGE_KEY = "roam-sticky-note-layouts";
-const COMMAND_LABEL = "Sticky Notes: Create Sticky Note";
-const NOTE_CLASS = "roamjs-sticky-note";
-const NOTE_MINIMIZED_CLASS = "roamjs-sticky-note--minimized";
-const NOTE_DRAGGING_CLASS = "roamjs-sticky-note--dragging";
-
-const logRoamMutationError = ({
-  operation,
-  uid,
-  error,
-}: {
-  operation: "updateBlock" | "deleteBlock";
-  uid: string;
-  error: unknown;
-}): void => {
-  console.error(`[sticky-note] Failed to ${operation} for block ${uid}`, error);
-};
-
-const randomRotation = (): number =>
-  Math.round((Math.random() * 3 - 1.5) * 10) / 10;
-
-const normalizeLayout = (layout: StickyNoteLayout): StickyNoteLayout => ({
-  ...layout,
-  rotation: Number.isFinite(layout.rotation)
-    ? layout.rotation
-    : randomRotation(),
-});
-
-const getLayouts = ({
-  extensionSettings,
-}: {
-  extensionSettings: OnloadArgs["extensionAPI"]["settings"];
-}): StickyNoteLayouts => {
-  const raw = extensionSettings.get(STORAGE_KEY);
-  if (typeof raw !== "string" || !raw) {
-    return {};
-  }
-  try {
-    const parsed = JSON.parse(raw) as StickyNoteLayouts;
-    return Object.fromEntries(
-      Object.entries(parsed).map(([uid, layout]) => [
-        uid,
-        normalizeLayout(layout),
-      ]),
-    );
-  } catch {
-    return {};
-  }
-};
-
-const setLayouts = ({
-  extensionSettings,
-  layouts,
-}: {
-  extensionSettings: OnloadArgs["extensionAPI"]["settings"];
-  layouts: StickyNoteLayouts;
-}): void => {
-  extensionSettings.set(STORAGE_KEY, JSON.stringify(layouts));
-};
-
-const getPageUid = (): string | null => {
-  const page = window.roamAlphaAPI.pull("[:block/uid]", [
-    ":node/title",
-    PAGE_TITLE,
-  ]) as { ":block/uid"?: string } | null;
-  return page?.[":block/uid"] || null;
-};
-
-const ensurePageUid = async (): Promise<string> => {
-  const existing = getPageUid();
-  if (existing) {
-    return existing;
-  }
-  return createPage({ title: PAGE_TITLE });
-};
-
-const fetchStickyNoteUids = (): string[] => {
-  const result = window.roamAlphaAPI.q(
-    `[:find ?uid ?order
-      :where
-        [?p :node/title "${PAGE_TITLE}"]
-        [?p :block/children ?c]
-        [?c :block/uid ?uid]
-        [?c :block/order ?order]]`,
-  ) as [string, number][];
-  return result.sort((a, b) => a[1] - b[1]).map((entry) => entry[0]);
-};
-
-const fetchBlockText = (uid: string): string => {
-  const result = window.roamAlphaAPI.q(
-    `[:find ?text
-      :in $ ?uid
-      :where
-        [?b :block/uid ?uid]
-        [(get-else $ ?b :block/string "") ?text]]`,
-    uid,
-  ) as [string][];
-  return result.length ? result[0][0] : "";
-};
-
-const ensureStickyNoteMeta = async (
-  noteUid: string,
-): Promise<StickyNoteMeta> => {
-  const noteText = fetchBlockText(noteUid).trim();
-
-  if (noteText) {
-    return {
-      titleUid: noteUid,
-      titleText: noteText,
-    };
-  }
-
-  try {
-    await window.roamAlphaAPI.updateBlock({
-      block: { uid: noteUid, string: "Sticky Note" },
-    });
-  } catch (error) {
-    logRoamMutationError({ operation: "updateBlock", uid: noteUid, error });
-  }
-  return {
-    titleUid: noteUid,
-    titleText: "Sticky Note",
-  };
-};
-
-const mountRoamBlock = ({
-  uid,
-  el,
-  open,
-}: {
-  uid: string;
-  el: HTMLElement;
-  open?: boolean;
-}): (() => void) => {
-  const globalWindow = window as unknown as {
-    React?: ReactLike;
-    ReactDOM?: ReactDomLike;
-    roamAlphaAPI?: { ui?: { react?: RoamReactApi } };
-  };
-  const React = globalWindow.React;
-  const ReactDOM = globalWindow.ReactDOM;
-  const Block = globalWindow.roamAlphaAPI?.ui?.react?.Block;
-  if (!React || !ReactDOM || !Block) {
-    return () => undefined;
-  }
-
-  ReactDOM.render(React.createElement(Block, { uid, open }), el);
-  return () => {
-    ReactDOM.unmountComponentAtNode(el);
-  };
-};
-
-const defaultLayout = (
-  index: number,
-  viewportWidth: number,
-  viewportHeight: number,
-): StickyNoteLayout => {
-  const width = 240;
-  const height = 220;
-  const offset = 30 * index;
-  const x = Math.min(100 + offset, Math.max(20, viewportWidth - width - 20));
-  const y = Math.min(120 + offset, Math.max(20, viewportHeight - height - 20));
-  return {
-    x,
-    y,
-    width,
-    height,
-    minimized: false,
-    rotation: randomRotation(),
-  };
-};
-
-const applyLayout = (note: HTMLElement, layout: StickyNoteLayout): void => {
-  note.style.left = `${layout.x}px`;
-  note.style.top = `${layout.y}px`;
-  note.style.width = `${layout.width}px`;
-  note.style.height = `${layout.height}px`;
-  note.style.transform = `rotate(${layout.rotation}deg)`;
-  note.classList.toggle(NOTE_MINIMIZED_CLASS, layout.minimized);
-};
-
-const mutateLayout = (
-  layouts: StickyNoteLayouts,
-  uid: string,
-  next: Partial<StickyNoteLayout>,
-): void => {
-  const current = layouts[uid];
-  layouts[uid] = {
-    ...(current || defaultLayout(0, window.innerWidth, window.innerHeight)),
-    ...next,
-  };
-};
+import {
+  COMMAND_LABEL,
+  NOTE_CLASS,
+  NOTE_DRAGGING_CLASS,
+  NOTE_MINIMIZED_CLASS,
+  SETTINGS_TAB_TITLE,
+} from "./constants";
+import {
+  applyLayout,
+  defaultLayout,
+  getLayouts,
+  mutateLayout,
+  setLayouts,
+  type StickyNoteLayout,
+  type StickyNoteLayouts,
+} from "./layoutStore";
+import {
+  ensurePageUid,
+  fetchStickyNoteRecords,
+  logRoamMutationError,
+  mountRoamBlock,
+  toStickyNoteMeta,
+  type StickyNoteMeta,
+} from "./roamApi";
 
 const getStickyRenderedIdFromUid = ({
   uid,
@@ -314,7 +107,8 @@ const createStickyNoteElement = ({
   layout,
   layouts,
   persistLayouts,
-  readLayoutsSetting,
+  scheduleLayoutsPersistence,
+  flushLayoutsPersistence,
   meta,
   resizeObservers,
   blockUnmounts,
@@ -323,7 +117,8 @@ const createStickyNoteElement = ({
   layout: StickyNoteLayout;
   layouts: StickyNoteLayouts;
   persistLayouts: () => void;
-  readLayoutsSetting: () => unknown;
+  scheduleLayoutsPersistence: () => void;
+  flushLayoutsPersistence: () => void;
   meta: StickyNoteMeta;
   resizeObservers: Set<ResizeObserver>;
   blockUnmounts: Set<() => void>;
@@ -341,16 +136,19 @@ const createStickyNoteElement = ({
   title.type = "text";
   title.value = meta.titleText || "Sticky Note";
   title.setAttribute("aria-label", "Sticky note title");
+  const titleMeasureContext = document.createElement("canvas").getContext("2d");
+  let titleFont: string | null = null;
   const measureTitleWidth = (value: string): number => {
     const text = value.trim() || "Sticky Note";
-    const canvas = document.createElement("canvas");
-    const ctx = canvas.getContext("2d");
-    if (!ctx) {
+    if (!titleMeasureContext) {
       return Math.max(36, text.length * 8);
     }
-    const computed = window.getComputedStyle(title);
-    ctx.font = `${computed.fontWeight} ${computed.fontSize} ${computed.fontFamily}`;
-    return Math.max(36, Math.ceil(ctx.measureText(text).width) + 10);
+    if (!titleFont) {
+      const titleStyle = window.getComputedStyle(title);
+      titleFont = `${titleStyle.fontWeight} ${titleStyle.fontSize} ${titleStyle.fontFamily}`;
+    }
+    titleMeasureContext.font = titleFont;
+    return Math.max(36, Math.ceil(titleMeasureContext.measureText(text).width) + 10);
   };
   const syncTitleWidth = (): void => {
     title.style.width = `${measureTitleWidth(title.value)}px`;
@@ -440,17 +238,6 @@ const createStickyNoteElement = ({
   let dragOffsetY = 0;
   let isDragging = false;
   let previousBodyUserSelect = "";
-  let resizePersistTimeout: number | null = null;
-
-  const scheduleLayoutPersistence = (): void => {
-    if (resizePersistTimeout) {
-      window.clearTimeout(resizePersistTimeout);
-    }
-    resizePersistTimeout = window.setTimeout(() => {
-      resizePersistTimeout = null;
-      persistLayouts();
-    }, 250);
-  };
 
   const onPointerMove = (event: PointerEvent): void => {
     if (!isDragging) {
@@ -461,7 +248,7 @@ const createStickyNoteElement = ({
     note.style.left = `${x}px`;
     note.style.top = `${y}px`;
     mutateLayout(layouts, uid, { x, y });
-    scheduleLayoutPersistence();
+    scheduleLayoutsPersistence();
   };
 
   const stopDragging = (): void => {
@@ -475,11 +262,7 @@ const createStickyNoteElement = ({
     document.removeEventListener("pointerup", stopDragging);
     document.removeEventListener("pointercancel", stopDragging);
     window.removeEventListener("blur", stopDragging);
-    if (resizePersistTimeout) {
-      window.clearTimeout(resizePersistTimeout);
-      resizePersistTimeout = null;
-    }
-    persistLayouts();
+    flushLayoutsPersistence();
   };
 
   const onPointerDown = (event: PointerEvent): void => {
@@ -529,7 +312,7 @@ const createStickyNoteElement = ({
         width: Math.round(entry.target.offsetWidth),
         height: Math.round(entry.target.offsetHeight),
       });
-      scheduleLayoutPersistence();
+      scheduleLayoutsPersistence();
     });
   });
   resizeObservers.add(resizeObserver);
@@ -545,17 +328,13 @@ const createStickyNoteElement = ({
       return;
     }
 
-    if (resizePersistTimeout) {
-      window.clearTimeout(resizePersistTimeout);
-      resizePersistTimeout = null;
-    }
     resizeObserver.disconnect();
     resizeObservers.delete(resizeObserver);
     cleanupEmbeddedBlock();
     blockUnmounts.delete(cleanupEmbeddedBlock);
     note.remove();
     delete layouts[uid];
-    persistLayouts();
+    flushLayoutsPersistence();
   });
 
   return note;
@@ -734,14 +513,39 @@ export default runExtension(async ({ extensionAPI }) => {
   const extensionSettings = extensionAPI.settings;
   const layouts = getLayouts({ extensionSettings });
   const persistLayouts = (): void => setLayouts({ extensionSettings, layouts });
-  const readLayoutsSetting = (): unknown => extensionSettings.get(STORAGE_KEY);
+  let layoutPersistTimeout: number | null = null;
+  const scheduleLayoutsPersistence = (): void => {
+    if (layoutPersistTimeout) {
+      window.clearTimeout(layoutPersistTimeout);
+    }
+    layoutPersistTimeout = window.setTimeout(() => {
+      layoutPersistTimeout = null;
+      persistLayouts();
+    }, 250);
+  };
+  const flushLayoutsPersistence = (): void => {
+    if (layoutPersistTimeout) {
+      window.clearTimeout(layoutPersistTimeout);
+      layoutPersistTimeout = null;
+    }
+    persistLayouts();
+  };
   const resizeObservers = new Set<ResizeObserver>();
   const blockUnmounts = new Set<() => void>();
   await ensurePageUid();
-  const existingUids = fetchStickyNoteUids();
+  const stickyNoteRecords = fetchStickyNoteRecords();
+  const existingUids = stickyNoteRecords.map(({ uid }) => uid);
+  const stickyNoteMetas = new Map<string, StickyNoteMeta>(
+    stickyNoteRecords.map(({ uid, text }) => [uid, toStickyNoteMeta({ uid, text })]),
+  );
+  const existingUidSet = new Set(existingUids);
+  const existingNoteFragment = document.createDocumentFragment();
 
   for (const [index, uid] of existingUids.entries()) {
-    const meta = await ensureStickyNoteMeta(uid);
+    const meta = stickyNoteMetas.get(uid);
+    if (!meta) {
+      continue;
+    }
     const layout =
       layouts[uid] ||
       defaultLayout(index, window.innerWidth, window.innerHeight);
@@ -751,15 +555,17 @@ export default runExtension(async ({ extensionAPI }) => {
       layout,
       layouts,
       persistLayouts,
-      readLayoutsSetting,
+      scheduleLayoutsPersistence,
+      flushLayoutsPersistence,
       meta,
       resizeObservers,
       blockUnmounts,
     });
-    container.append(note);
+    existingNoteFragment.append(note);
   }
+  container.append(existingNoteFragment);
   for (const key of Object.keys(layouts)) {
-    if (!existingUids.includes(key)) {
+    if (!existingUidSet.has(key)) {
       delete layouts[key];
     }
   }
@@ -793,7 +599,8 @@ export default runExtension(async ({ extensionAPI }) => {
         layout,
         layouts,
         persistLayouts,
-        readLayoutsSetting,
+        scheduleLayoutsPersistence,
+        flushLayoutsPersistence,
         meta: { titleUid: uid, titleText: "Sticky Note" },
         resizeObservers,
         blockUnmounts,
@@ -818,6 +625,24 @@ export default runExtension(async ({ extensionAPI }) => {
     }
   };
 
+  extensionSettings.panel.create({
+    tabTitle: SETTINGS_TAB_TITLE,
+    settings: [
+      {
+        id: "create-sticky-note",
+        name: "Create Sticky Note",
+        description: "Create a new sticky note.",
+        action: {
+          type: "button",
+          content: "Create",
+          onClick: () => {
+            void createStickyNote();
+          },
+        },
+      },
+    ],
+  });
+
   await extensionAPI.ui.commandPalette.addCommand({
     label: COMMAND_LABEL,
     callback: createStickyNote,
@@ -828,6 +653,10 @@ export default runExtension(async ({ extensionAPI }) => {
     commands: [COMMAND_LABEL],
     unload: () => {
       delete stickyNoteDebug.roamjsStickyNoteDebug;
+      if (layoutPersistTimeout) {
+        window.clearTimeout(layoutPersistTimeout);
+        layoutPersistTimeout = null;
+      }
       resizeObservers.forEach((observer) => observer.disconnect());
       resizeObservers.clear();
       blockUnmounts.forEach((unmount) => unmount());
