@@ -9,7 +9,6 @@ export type StickyNoteMeta = {
 
 export type StickyNoteRecord = {
   uid: string;
-  order: number;
   text: string;
 };
 
@@ -46,7 +45,7 @@ export const logRoamMutationError = ({
   console.error(`[sticky-note] Failed to ${operation} for block ${uid}`, error);
 };
 
-export const getPageUid = (): string | null => {
+const getPageUid = (): string | null => {
   const page = window.roamAlphaAPI.pull("[:block/uid]", [
     ":node/title",
     PAGE_TITLE,
@@ -75,9 +74,16 @@ export const fetchStickyNoteRecords = (): StickyNoteRecord[] => {
 
   return result
     .sort((a, b) => a[1] - b[1])
-    .map(([uid, order, text]) => ({ uid, order, text }));
+    .map(([uid, , text]) => ({ uid, text }));
 };
 
+/**
+ * Maps a raw sticky note record to display metadata.
+ * Empty titles default to "Sticky Note" client-side only — we intentionally
+ * skip the database write that the old `ensureStickyNoteMeta` performed,
+ * to avoid unnecessary Roam API calls at startup. The title is persisted
+ * to Roam when the user edits it (via `commitTitle` in the UI).
+ */
 export const toStickyNoteMeta = ({
   uid,
   text,

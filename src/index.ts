@@ -137,12 +137,15 @@ const createStickyNoteElement = ({
   title.value = meta.titleText || "Sticky Note";
   title.setAttribute("aria-label", "Sticky note title");
   const titleMeasureContext = document.createElement("canvas").getContext("2d");
-  const titleStyle = window.getComputedStyle(title);
-  const titleFont = `${titleStyle.fontWeight} ${titleStyle.fontSize} ${titleStyle.fontFamily}`;
+  let titleFont: string | null = null;
   const measureTitleWidth = (value: string): number => {
     const text = value.trim() || "Sticky Note";
     if (!titleMeasureContext) {
       return Math.max(36, text.length * 8);
+    }
+    if (!titleFont) {
+      const titleStyle = window.getComputedStyle(title);
+      titleFont = `${titleStyle.fontWeight} ${titleStyle.fontSize} ${titleStyle.fontFamily}`;
     }
     titleMeasureContext.font = titleFont;
     return Math.max(36, Math.ceil(titleMeasureContext.measureText(text).width) + 10);
