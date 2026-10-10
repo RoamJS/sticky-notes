@@ -6,7 +6,7 @@
 
 **Quick, ephemeral notes that float on top of your Roam Research graph.** Jot something down, drag it wherever you want, and when you're done—remove it. No clutter, no permanent page unless you want one.
 
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/RoamJS/sticky-notes)
+[![RoamJS](https://roamjs.com/badges/website.svg)](https://roamjs.com/) [![DeepWiki](https://roamjs.com/badges/deepwiki.svg)](https://deepwiki.com/RoamJS/sticky-notes) [![Slack](https://roamjs.com/badges/slack.svg)](https://roamresearch.slack.com/archives/C016N2B66JU)
 
 ![](https://github.com/user-attachments/assets/42328dfa-04d5-4a92-bdac-ac824758c213")
 
